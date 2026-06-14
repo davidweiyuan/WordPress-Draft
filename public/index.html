@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WordPress Draft Translator</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace" aria-labelledby="page-title">
+        <div class="masthead">
+          <div>
+            <p class="eyebrow">Traditional Chinese Drafts</p>
+            <h1 id="page-title">WordPress Draft Translator</h1>
+          </div>
+          <div class="masthead-actions">
+            <a class="connect-button" href="/auth/login">Connect WordPress.com</a>
+            <span class="status-pill" id="status-pill">Ready</span>
+          </div>
+        </div>
+
+        <form id="draft-form" class="control-bar">
+          <label for="url-input">Article URL</label>
+          <div class="url-row">
+            <input
+              id="url-input"
+              name="url"
+              type="url"
+              placeholder="https://example.com/article"
+              autocomplete="url"
+              required
+            >
+            <button id="preview-button" type="button">Preview</button>
+            <button id="draft-button" type="submit">Create Draft</button>
+          </div>
+        </form>
+
+        <div id="message" class="message" role="status" aria-live="polite"></div>
+
+        <section class="preview-panel" aria-labelledby="preview-title">
+          <div class="preview-header">
+            <h2 id="preview-title">Preview</h2>
+            <a id="draft-link" href="#" target="_blank" rel="noreferrer" hidden>Open WordPress Post</a>
+          </div>
+          <article id="preview-output" class="preview-output">
+            <p class="muted">Paste an English article URL to translate text and create a draft with translated article images.</p>
+          </article>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
