@@ -15,6 +15,34 @@ const imageMimeToExt = new Map([
   ["image/webp", "webp"],
   ["image/gif", "gif"]
 ]);
+const mainContentExcludeSelector = [
+  "aside",
+  "footer",
+  "nav",
+  "form",
+  "script",
+  "style",
+  "noscript",
+  "template",
+  "[role='complementary']",
+  "[role='contentinfo']",
+  "[role='navigation']",
+  "[aria-label*='comment' i]",
+  "[id*='comment' i]",
+  "[class*='comment' i]",
+  "[id*='footnote' i]",
+  "[class*='footnote' i]",
+  "[id*='endnote' i]",
+  "[class*='endnote' i]",
+  "[id*='appendix' i]",
+  "[class*='appendix' i]",
+  "[id*='related' i]",
+  "[class*='related' i]",
+  "[id*='share' i]",
+  "[class*='share' i]"
+].join(",");
+const sectionCutoffHeadingPattern =
+  /^(footnotes?|endnotes?|notes?|references|appendix|appendices|comments?|responses?|discussion)\b/i;
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static("public"));
@@ -74,21 +102,82 @@ function normalizeUrl(value) {
 
 function extractArticle(html, url) {
   const dom = new JSDOM(html, { url });
-  const reader = new Readability(dom.window.document);
+  const document = dom.window.document;
+  const reader = new Readability(document.cloneNode(true));
   const article = reader.parse();
 
   if (!article?.textContent?.trim()) {
     throw new Error("Could not extract readable article text from that URL.");
   }
 
+  const mainContent = cleanMainArticleContent(article.content || "", url);
+  const mainText = extractMainArticleText(mainContent, article.textContent);
+  const mainImage = extractMainArticleImage(document, mainContent, url);
+
   return {
     title: article.title || dom.window.document.title || "Untitled",
-    text: article.textContent.trim(),
-    content: article.content || "",
-    images: extractArticleImages(article.content || "", url),
+    text: mainText,
+    content: mainContent,
+    images: mainImage ? [mainImage] : [],
     excerpt: article.excerpt || "",
     byline: article.byline || ""
   };
+}
+
+function cleanMainArticleContent(content, sourceUrl) {
+  const dom = new JSDOM(`<article>${content}</article>`, { url: sourceUrl });
+  const document = dom.window.document;
+  const article = document.querySelector("article");
+
+  article.querySelectorAll(mainContentExcludeSelector).forEach((element) => element.remove());
+  article
+    .querySelectorAll("sup, a[role='doc-noteref'], a[href^='#fn'], a[href^='#footnote']")
+    .forEach((element) => element.remove());
+
+  [...article.querySelectorAll("h1,h2,h3,h4,h5,h6")]
+    .filter((heading) => sectionCutoffHeadingPattern.test(normalizeHeadingText(heading.textContent)))
+    .forEach(removeSectionStartingAtHeading);
+
+  return article.innerHTML.trim();
+}
+
+function normalizeHeadingText(value) {
+  return String(value).replace(/\s+/g, " ").replace(/[:：]+$/, "").trim();
+}
+
+function headingLevel(element) {
+  return Number(element.tagName.slice(1));
+}
+
+function removeSectionStartingAtHeading(heading) {
+  const level = headingLevel(heading);
+  let node = heading;
+
+  while (node) {
+    const next = node.nextElementSibling;
+    node.remove();
+
+    if (next?.matches("h1,h2,h3,h4,h5,h6") && headingLevel(next) <= level) {
+      break;
+    }
+
+    node = next;
+  }
+}
+
+function extractMainArticleText(content, fallbackText) {
+  const dom = new JSDOM(`<article>${content}</article>`);
+  const blocks = [];
+
+  for (const element of dom.window.document.querySelectorAll("h1,h2,h3,h4,h5,h6,p,blockquote,li")) {
+    if (element.closest("blockquote") && element.tagName !== "BLOCKQUOTE") continue;
+
+    const text = element.textContent.replace(/\s+/g, " ").trim();
+    if (text) blocks.push(text);
+  }
+
+  const text = blocks.join("\n\n").trim();
+  return text || fallbackText.trim();
 }
 
 function extractArticleImages(content, sourceUrl) {
@@ -119,6 +208,42 @@ function extractArticleImages(content, sourceUrl) {
     });
 }
 
+function extractMainArticleImage(document, content, sourceUrl) {
+  const articleImage = extractArticleImages(content, sourceUrl).find(isLikelyArticleImage);
+  if (articleImage) return articleImage;
+
+  const metaUrl =
+    document.querySelector("meta[property='og:image']")?.getAttribute("content") ||
+    document.querySelector("meta[name='twitter:image']")?.getAttribute("content");
+  if (!metaUrl) return null;
+
+  try {
+    return {
+      url: new URL(metaUrl, sourceUrl).toString(),
+      alt:
+        document.querySelector("meta[property='og:image:alt']")?.getAttribute("content") ||
+        document.querySelector("meta[name='twitter:image:alt']")?.getAttribute("content") ||
+        "",
+      width: Number(document.querySelector("meta[property='og:image:width']")?.getAttribute("content") || 0),
+      height: Number(document.querySelector("meta[property='og:image:height']")?.getAttribute("content") || 0)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isLikelyArticleImage(image) {
+  const smallestKnownSide = Math.min(image.width || Infinity, image.height || Infinity);
+  const url = image.url.toLowerCase();
+  const alt = image.alt.toLowerCase();
+
+  if (smallestKnownSide < 120) return false;
+  if (/(avatar|author|logo|icon|tracking|pixel|spacer)/.test(url)) return false;
+  if (/(avatar|author|logo|icon)/.test(alt)) return false;
+
+  return true;
+}
+
 async function fetchArticle(url) {
   const response = await fetch(url, {
     headers: {
@@ -144,7 +269,7 @@ function buildTranslationPrompt(article, sourceUrl) {
     {
       role: "system",
       content:
-        "You translate English Christian essays into natural Traditional Chinese for a WordPress audience. Preserve meaning, paragraph structure, scripture references, names, and quoted material. Return only valid JSON."
+        "You translate English Christian essays into natural Traditional Chinese for a WordPress audience. Translate only the main article body. Preserve meaning, paragraph structure, scripture references, names, and quoted material. Return only valid JSON."
     },
     {
       role: "user",
@@ -155,14 +280,15 @@ Requirements:
 - Use Traditional Chinese.
 - Keep the title faithful and natural.
 - Use semantic HTML paragraphs and headings only where appropriate.
+- Translate only the main article text below.
+- Do not include footnotes, endnotes, references, appendix material, reader comments, related links, sharing text, author bios, or comment prompts.
+- Create the excerpt from the translated main article text.
 - Do not add commentary.
 - At the end of html, add this exact source link paragraph: <p><a href="${sourceUrl}">English</a></p>
 
 Original title: ${article.title}
-Byline: ${article.byline || "N/A"}
-Excerpt: ${article.excerpt || "N/A"}
 
-Article text:
+Main article text:
 ${article.text}`
     }
   ];
@@ -373,9 +499,8 @@ async function uploadWordPressMedia(image, index) {
   };
 }
 
-async function translateAndUploadImages(images) {
-  const maxImages = Number(process.env.MAX_TRANSLATED_IMAGES || 3);
-  const selectedImages = images.slice(0, maxImages);
+async function translateAndUploadMainImage(images) {
+  const selectedImages = images.slice(0, 1);
   const uploaded = [];
 
   for (const [index, image] of selectedImages.entries()) {
@@ -457,7 +582,7 @@ app.post("/api/drafts", async (req, res) => {
     const html = await fetchArticle(sourceUrl);
     const article = extractArticle(html, sourceUrl);
     const translated = await translateArticle(article, sourceUrl);
-    const uploadedImages = await translateAndUploadImages(article.images);
+    const uploadedImages = await translateAndUploadMainImage(article.images);
     translated.html = insertImagesBeforeSourceLink(translated.html, uploadedImages);
     const draft = await createWordPressDraft(translated);
 

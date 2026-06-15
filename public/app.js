@@ -71,7 +71,7 @@ previewButton.addEventListener("click", async () => {
     showMessage("Fetching and translating the article...");
     const data = await requestJson("/api/preview", urlInput.value);
     setPreview(data);
-    const imageNote = data.imageCount ? ` ${data.imageCount} article image(s) will be translated during draft creation.` : "";
+    const imageNote = data.imageCount ? " The lead image will be translated during draft creation." : "";
     showMessage(`Preview translated. Review it, then create the draft.${imageNote}`, "success");
   } catch (error) {
     showMessage(error.message, "error");
@@ -88,7 +88,7 @@ form.addEventListener("submit", async (event) => {
     setBusy(true, "Publishing");
     showMessage("Translating and creating a WordPress draft...");
     const data = await requestJson("/api/drafts", urlInput.value);
-    const imageNote = data.imageCount ? ` Translated ${data.imageCount} image(s).` : "";
+    const imageNote = data.imageCount ? " Translated the lead image." : "";
     showMessage(`Draft created: ${data.title}.${imageNote}`, "success");
 
     if (data.wordpress?.editUrl) {

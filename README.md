@@ -40,7 +40,7 @@ Local app for turning an English article URL into a Traditional Chinese WordPres
 6. Paste an English article URL and use either:
 
    - `Preview` to translate text without creating a post.
-   - `Create Draft` to translate text, translate English text inside article images, upload edited images to WordPress, and create a WordPress draft.
+   - `Create Draft` to translate the main article text, translate English text inside the lead article image, upload the edited image to WordPress, and create a WordPress draft.
 
 Every draft ends with a link to the original article titled `English`.
 
@@ -49,4 +49,4 @@ Every draft ends with a link to the original article titled `English`.
 - Text translation: `google/gemini-3.5-flash`
 - Image text translation/editing: `openai/gpt-5-image`
 
-The image pipeline processes up to `MAX_TRANSLATED_IMAGES` article images per draft.
+The image pipeline processes one lead article image per draft.
