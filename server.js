@@ -297,13 +297,53 @@ ${article.text}`
 function parseJsonFromModel(content) {
   const trimmed = content.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  const jsonText = fenced ? fenced[1] : trimmed;
+  const jsonText = extractJsonObject(fenced ? fenced[1] : trimmed);
 
   try {
     return JSON.parse(jsonText);
   } catch (error) {
     throw new Error(`Translation response was not valid JSON: ${error.message}`);
   }
+}
+
+function extractJsonObject(value) {
+  const text = String(value).trim();
+  const start = text.indexOf("{");
+  if (start === -1) return text;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = inString;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+
+    if (depth === 0) {
+      return text.slice(start, index + 1);
+    }
+  }
+
+  return text;
 }
 
 async function translateArticle(article, sourceUrl) {
