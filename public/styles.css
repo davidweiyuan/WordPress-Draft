@@ -111,11 +111,40 @@ label {
   font-weight: 700;
 }
 
+.checkbox-row,
+.checkbox-control {
+  display: inline-flex;
+  align-items: center;
+}
+
+.checkbox-row {
+  width: fit-content;
+  gap: 20px;
+}
+
+.checkbox-control {
+  width: fit-content;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.checkbox-control:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.checkbox-control input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .url-row {
   gap: 10px;
 }
 
-input {
+.url-row input {
   min-width: 0;
   width: 100%;
   height: 46px;
@@ -126,7 +155,7 @@ input {
   color: var(--ink);
 }
 
-input:focus {
+.url-row input:focus {
   border-color: var(--accent);
   outline: 3px solid rgba(31, 111, 104, 0.16);
 }

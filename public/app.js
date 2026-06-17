@@ -2,6 +2,8 @@ const form = document.querySelector("#draft-form");
 const urlInput = document.querySelector("#url-input");
 const previewButton = document.querySelector("#preview-button");
 const draftButton = document.querySelector("#draft-button");
+const includeImageInput = document.querySelector("#include-image");
+const translateImageInput = document.querySelector("#translate-image");
 const message = document.querySelector("#message");
 const previewOutput = document.querySelector("#preview-output");
 const statusPill = document.querySelector("#status-pill");
@@ -11,6 +13,8 @@ const connectButton = document.querySelector(".connect-button");
 function setBusy(isBusy, label = "Working") {
   previewButton.disabled = isBusy;
   draftButton.disabled = isBusy;
+  includeImageInput.disabled = isBusy;
+  translateImageInput.disabled = isBusy || !includeImageInput.checked;
   statusPill.textContent = isBusy ? label : "Ready";
 }
 
@@ -32,11 +36,11 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-async function requestJson(path, url) {
+async function requestJson(path, url, includeImage, translateImage) {
   const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url })
+    body: JSON.stringify({ url, includeImage, translateImage })
   });
 
   const data = await response.json();
@@ -69,9 +73,20 @@ previewButton.addEventListener("click", async () => {
     draftLink.hidden = true;
     setBusy(true, "Translating");
     showMessage("Fetching and translating the article...");
-    const data = await requestJson("/api/preview", urlInput.value);
+    const includeImage = includeImageInput.checked;
+    const translateImage = translateImageInput.checked;
+    const data = await requestJson(
+      "/api/preview",
+      urlInput.value,
+      includeImage,
+      translateImage
+    );
     setPreview(data);
-    const imageNote = data.imageCount ? " The lead image will be translated during draft creation." : "";
+    const imageNote = includeImage && data.imageCount
+      ? translateImage
+        ? " The lead image will be translated during draft creation."
+        : " The original lead image will be included during draft creation."
+      : "";
     showMessage(`Preview translated. Review it, then create the draft.${imageNote}`, "success");
   } catch (error) {
     showMessage(error.message, "error");
@@ -86,9 +101,26 @@ form.addEventListener("submit", async (event) => {
   try {
     draftLink.hidden = true;
     setBusy(true, "Publishing");
-    showMessage("Translating and creating a WordPress draft...");
-    const data = await requestJson("/api/drafts", urlInput.value);
-    const imageNote = data.imageCount ? " Translated the lead image." : "";
+    const includeImage = includeImageInput.checked;
+    const translateImage = translateImageInput.checked;
+    showMessage(
+      includeImage
+        ? translateImage
+          ? "Translating the article and lead image, then creating a WordPress draft..."
+          : "Translating the article and adding the original lead image..."
+        : "Translating the article and creating a WordPress draft..."
+    );
+    const data = await requestJson(
+      "/api/drafts",
+      urlInput.value,
+      includeImage,
+      translateImage
+    );
+    const imageNote = data.imageCount
+      ? data.imageTranslated
+        ? " Translated the lead image."
+        : " Included the original lead image."
+      : "";
     showMessage(`Draft created: ${data.title}.${imageNote}`, "success");
 
     if (data.wordpress?.editUrl) {
@@ -101,5 +133,7 @@ form.addEventListener("submit", async (event) => {
     setBusy(false);
   }
 });
+
+includeImageInput.addEventListener("change", () => setBusy(false));
 
 refreshAuthStatus();

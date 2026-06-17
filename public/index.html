@@ -34,6 +34,16 @@
             <button id="preview-button" type="button">Preview</button>
             <button id="draft-button" type="submit">Create Draft</button>
           </div>
+          <div class="checkbox-row">
+            <label class="checkbox-control" for="include-image">
+              <input id="include-image" name="includeImage" type="checkbox" checked>
+              <span>Include Image</span>
+            </label>
+            <label class="checkbox-control" for="translate-image">
+              <input id="translate-image" name="translateImage" type="checkbox" checked>
+              <span>Translate</span>
+            </label>
+          </div>
         </form>
 
         <div id="message" class="message" role="status" aria-live="polite"></div>
@@ -44,7 +54,7 @@
             <a id="draft-link" href="#" target="_blank" rel="noreferrer" hidden>Open WordPress Post</a>
           </div>
           <article id="preview-output" class="preview-output">
-            <p class="muted">Paste an English article URL to translate text and create a draft with translated article images.</p>
+            <p class="muted">Paste an English article URL to translate the main text and create a WordPress draft.</p>
           </article>
         </section>
       </section>

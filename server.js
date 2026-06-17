@@ -13,7 +13,9 @@ const imageMimeToExt = new Map([
   ["image/jpeg", "jpg"],
   ["image/png", "png"],
   ["image/webp", "webp"],
-  ["image/gif", "gif"]
+  ["image/gif", "gif"],
+  ["image/avif", "avif"],
+  ["image/svg+xml", "svg"]
 ]);
 const mainContentExcludeSelector = [
   "aside",
@@ -284,6 +286,7 @@ Requirements:
 - Do not include footnotes, endnotes, references, appendix material, reader comments, related links, sharing text, author bios, or comment prompts.
 - Create the excerpt from the translated main article text.
 - Do not add commentary.
+- Return JSON string values with all newlines, tabs, and other control characters properly escaped.
 - At the end of html, add this exact source link paragraph: <p><a href="${sourceUrl}">English</a></p>
 
 Original title: ${article.title}
@@ -302,8 +305,54 @@ function parseJsonFromModel(content) {
   try {
     return JSON.parse(jsonText);
   } catch (error) {
-    throw new Error(`Translation response was not valid JSON: ${error.message}`);
+    try {
+      return JSON.parse(escapeControlCharactersInJsonStrings(jsonText));
+    } catch {
+      throw new Error(`Translation response was not valid JSON: ${error.message}`);
+    }
   }
+}
+
+function escapeControlCharactersInJsonStrings(value) {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+
+  for (const char of String(value)) {
+    if (escaped) {
+      result += char;
+      escaped = false;
+      continue;
+    }
+
+    if (inString && char === "\\") {
+      result += char;
+      escaped = true;
+      continue;
+    }
+
+    if (char === '"') {
+      result += char;
+      inString = !inString;
+      continue;
+    }
+
+    if (inString && char.charCodeAt(0) < 0x20) {
+      const escapes = {
+        "\b": "\\b",
+        "\t": "\\t",
+        "\n": "\\n",
+        "\f": "\\f",
+        "\r": "\\r"
+      };
+      result += escapes[char] || `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
+      continue;
+    }
+
+    result += char;
+  }
+
+  return result;
 }
 
 function extractJsonObject(value) {
@@ -487,7 +536,8 @@ async function translateImageText(image, index) {
   return {
     ...image,
     bytes: edited.bytes,
-    mimeType: edited.mimeType || "image/png"
+    mimeType: edited.mimeType || "image/png",
+    translated: true
   };
 }
 
@@ -504,7 +554,8 @@ function mediaFilename(image, index) {
     ? sourceName.replace(/\.[^.]+$/, "")
     : `translated-image-${index + 1}`;
 
-  return `${base}-zh.${ext}`;
+  const suffix = image.translated ? "-zh" : "";
+  return `${base}${suffix}.${ext}`;
 }
 
 async function uploadWordPressMedia(image, index) {
@@ -539,13 +590,24 @@ async function uploadWordPressMedia(image, index) {
   };
 }
 
-async function translateAndUploadMainImage(images) {
+async function uploadMainImage(images, translateImage) {
   const selectedImages = images.slice(0, 1);
   const uploaded = [];
 
   for (const [index, image] of selectedImages.entries()) {
-    const translatedImage = await translateImageText(image, index);
-    uploaded.push(await uploadWordPressMedia(translatedImage, index));
+    if (translateImage) {
+      const translatedImage = await translateImageText(image, index);
+      uploaded.push(await uploadWordPressMedia(translatedImage, index));
+      continue;
+    }
+
+    const original = await downloadImage(image.url);
+    uploaded.push(await uploadWordPressMedia({
+      ...image,
+      bytes: original.bytes,
+      mimeType: original.mimeType,
+      translated: false
+    }, index));
   }
 
   return uploaded;
@@ -617,12 +679,16 @@ async function createWordPressDraft(post) {
 app.post("/api/drafts", async (req, res) => {
   try {
     const sourceUrl = normalizeUrl(req.body?.url || "");
+    const includeImage = req.body?.includeImage !== false;
+    const translateImage = req.body?.translateImage !== false;
     await getWordPressToken();
 
     const html = await fetchArticle(sourceUrl);
     const article = extractArticle(html, sourceUrl);
     const translated = await translateArticle(article, sourceUrl);
-    const uploadedImages = await translateAndUploadMainImage(article.images);
+    const uploadedImages = includeImage
+      ? await uploadMainImage(article.images, translateImage)
+      : [];
     translated.html = insertImagesBeforeSourceLink(translated.html, uploadedImages);
     const draft = await createWordPressDraft(translated);
 
@@ -631,6 +697,7 @@ app.post("/api/drafts", async (req, res) => {
       sourceUrl,
       title: translated.title,
       imageCount: uploadedImages.length,
+      imageTranslated: uploadedImages.length > 0 && translateImage,
       wordpress: {
         id: draft.id,
         editUrl: draft.link,
@@ -725,6 +792,8 @@ app.get("/api/auth/status", async (req, res) => {
 app.post("/api/preview", async (req, res) => {
   try {
     const sourceUrl = normalizeUrl(req.body?.url || "");
+    const includeImage = req.body?.includeImage !== false;
+    const translateImage = req.body?.translateImage !== false;
     const html = await fetchArticle(sourceUrl);
     const article = extractArticle(html, sourceUrl);
     const translated = await translateArticle(article, sourceUrl);
@@ -733,7 +802,8 @@ app.post("/api/preview", async (req, res) => {
       ok: true,
       sourceUrl,
       originalTitle: article.title,
-      imageCount: article.images.length,
+      imageCount: includeImage ? article.images.length : 0,
+      imageTranslated: includeImage && translateImage,
       ...translated
     });
   } catch (error) {
