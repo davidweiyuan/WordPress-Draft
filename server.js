@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
+import sharp from "sharp";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -16,6 +17,12 @@ const imageMimeToExt = new Map([
   ["image/gif", "gif"],
   ["image/avif", "avif"],
   ["image/svg+xml", "svg"]
+]);
+const wordpressImageMimeTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp"
 ]);
 const mainContentExcludeSelector = [
   "aside",
@@ -184,11 +191,17 @@ function extractMainArticleText(content, fallbackText) {
 
 function extractArticleImages(content, sourceUrl) {
   const dom = new JSDOM(`<article>${content}</article>`, { url: sourceUrl });
+  return extractImagesFromContainer(dom.window.document.querySelector("article"), sourceUrl);
+}
+
+function extractImagesFromContainer(container, sourceUrl) {
+  if (!container) return [];
+
   const seen = new Set();
 
-  return [...dom.window.document.querySelectorAll("img")]
+  return [...container.querySelectorAll("img")]
     .map((img) => {
-      const src = img.getAttribute("src");
+      const src = imageSourceFromElement(img);
       if (!src) return null;
 
       let url;
@@ -210,7 +223,32 @@ function extractArticleImages(content, sourceUrl) {
     });
 }
 
+function imageSourceFromElement(img) {
+  const lazySource =
+    img.getAttribute("data-lazy-src") ||
+    img.getAttribute("data-src") ||
+    img.getAttribute("data-original");
+  if (lazySource) return lazySource;
+
+  const srcset =
+    img.getAttribute("srcset") ||
+    img.closest("picture")?.querySelector("source[srcset]")?.getAttribute("srcset");
+  if (srcset) {
+    const lastCandidate = srcset.split(",").at(-1)?.trim();
+    const srcsetUrl = lastCandidate?.split(/\s+/)[0];
+    if (srcsetUrl) return srcsetUrl;
+  }
+
+  return img.getAttribute("src");
+}
+
 function extractMainArticleImage(document, content, sourceUrl) {
+  for (const container of findOriginalArticleContainers(document)) {
+    const topImage = extractImagesFromContainer(container, sourceUrl)
+      .find(isLikelyArticleImage);
+    if (topImage) return topImage;
+  }
+
   const articleImage = extractArticleImages(content, sourceUrl).find(isLikelyArticleImage);
   if (articleImage) return articleImage;
 
@@ -232,6 +270,30 @@ function extractMainArticleImage(document, content, sourceUrl) {
   } catch {
     return null;
   }
+}
+
+function findOriginalArticleContainers(document) {
+  const selectors = [
+    "main article",
+    "[role='main'] article",
+    ".entry-content",
+    ".post-content",
+    ".article-content",
+    "article",
+    "main"
+  ];
+  const containers = [];
+  const seen = new Set();
+
+  for (const selector of selectors) {
+    for (const container of document.querySelectorAll(selector)) {
+      if (seen.has(container)) continue;
+      seen.add(container);
+      containers.push(container);
+    }
+  }
+
+  return containers;
 }
 
 function isLikelyArticleImage(image) {
@@ -560,15 +622,16 @@ function mediaFilename(image, index) {
 
 async function uploadWordPressMedia(image, index) {
   const token = await getWordPressToken();
-  const filename = mediaFilename(image, index);
+  const compatibleImage = await makeWordPressCompatibleImage(image);
+  const filename = mediaFilename(compatibleImage, index);
   const response = await fetch(`${wordpressApiBase()}/media`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token.access_token}`,
-      "Content-Type": image.mimeType,
+      "Content-Type": compatibleImage.mimeType,
       "Content-Disposition": `attachment; filename="${filename}"`
     },
-    body: image.bytes
+    body: compatibleImage.bytes
   });
 
   const body = await response.text();
@@ -586,8 +649,26 @@ async function uploadWordPressMedia(image, index) {
   return {
     id: data.id,
     url: data.source_url || data.guid?.rendered || data.link,
-    alt: image.alt || ""
+    alt: compatibleImage.alt || ""
   };
+}
+
+async function makeWordPressCompatibleImage(image) {
+  if (wordpressImageMimeTypes.has(image.mimeType)) {
+    return image;
+  }
+
+  try {
+    return {
+      ...image,
+      bytes: await sharp(image.bytes, { animated: true }).png().toBuffer(),
+      mimeType: "image/png"
+    };
+  } catch (error) {
+    throw new Error(
+      `Could not convert ${image.mimeType || "the source image"} to a WordPress-compatible PNG: ${error.message}`
+    );
+  }
 }
 
 async function uploadMainImage(images, translateImage) {
@@ -645,7 +726,22 @@ function insertImagesBeforeSourceLink(html, images) {
   return `${html}\n${imageHtml}`;
 }
 
-async function createWordPressDraft(post) {
+function buildWordPressPostPayload(post, featuredMediaId) {
+  const payload = {
+    title: post.title,
+    content: post.html,
+    excerpt: post.excerpt,
+    status: "draft"
+  };
+
+  if (featuredMediaId) {
+    payload.featured_media = featuredMediaId;
+  }
+
+  return payload;
+}
+
+async function createWordPressDraft(post, featuredMediaId) {
   const token = await getWordPressToken();
   const response = await fetch(`${wordpressApiBase()}/posts`, {
     method: "POST",
@@ -653,12 +749,7 @@ async function createWordPressDraft(post) {
       Authorization: `Bearer ${token.access_token}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({
-      title: post.title,
-      content: post.html,
-      excerpt: post.excerpt,
-      status: "draft"
-    })
+    body: JSON.stringify(buildWordPressPostPayload(post, featuredMediaId))
   });
 
   const body = await response.text();
@@ -690,7 +781,7 @@ app.post("/api/drafts", async (req, res) => {
       ? await uploadMainImage(article.images, translateImage)
       : [];
     translated.html = insertImagesBeforeSourceLink(translated.html, uploadedImages);
-    const draft = await createWordPressDraft(translated);
+    const draft = await createWordPressDraft(translated, uploadedImages[0]?.id);
 
     res.json({
       ok: true,

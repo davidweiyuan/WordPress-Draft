@@ -51,4 +51,4 @@ Every draft ends with a link to the original article titled `English`.
 - Text translation: `google/gemini-3.5-flash`
 - Image text translation/editing: `openai/gpt-5-image`
 
-When `Include Image` is checked, the image pipeline processes one lead article image per draft. The image model is only used when `Translate` is also checked.
+When `Include Image` is checked, the image pipeline uses the first suitable image near the top of the article and processes at most one image per draft. That same uploaded image is inserted into the post and assigned as the WordPress featured image/thumbnail. The image model is only used when `Translate` is also checked.
