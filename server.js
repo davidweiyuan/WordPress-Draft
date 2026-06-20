@@ -201,19 +201,23 @@ function extractImagesFromContainer(container, sourceUrl) {
 
   return [...container.querySelectorAll("img")]
     .map((img) => {
-      const src = imageSourceFromElement(img);
-      if (!src) return null;
+      const source = imageSourceFromElement(img);
+      if (!source?.url) return null;
 
       let url;
       try {
-        url = new URL(src, sourceUrl).toString();
+        url = new URL(source.url, sourceUrl).toString();
       } catch {
         return null;
       }
 
       const alt = img.getAttribute("alt") || "";
-      const width = Number(img.getAttribute("width") || 0);
-      const height = Number(img.getAttribute("height") || 0);
+      const renderedWidth = Number(img.getAttribute("width") || 0);
+      const renderedHeight = Number(img.getAttribute("height") || 0);
+      const width = source.width || renderedWidth;
+      const height = source.width && renderedWidth && renderedHeight
+        ? Math.round(source.width * (renderedHeight / renderedWidth))
+        : renderedHeight;
       return { url, alt, width, height };
     })
     .filter((image) => {
@@ -224,32 +228,46 @@ function extractImagesFromContainer(container, sourceUrl) {
 }
 
 function imageSourceFromElement(img) {
-  const lazySource =
-    img.getAttribute("data-lazy-src") ||
-    img.getAttribute("data-src") ||
-    img.getAttribute("data-original");
-  if (lazySource) return lazySource;
-
   const srcset =
     img.getAttribute("srcset") ||
     img.closest("picture")?.querySelector("source[srcset]")?.getAttribute("srcset");
   if (srcset) {
-    const lastCandidate = srcset.split(",").at(-1)?.trim();
-    const srcsetUrl = lastCandidate?.split(/\s+/)[0];
-    if (srcsetUrl) return srcsetUrl;
+    const candidates = srcset
+      .split(",")
+      .map((candidate) => {
+        const [url, descriptor = ""] = candidate.trim().split(/\s+/);
+        const width = descriptor.endsWith("w")
+          ? Number(descriptor.slice(0, -1))
+          : 0;
+        return { url, width };
+      })
+      .filter((candidate) => candidate.url);
+    const largestCandidate = candidates.reduce(
+      (largest, candidate) => candidate.width > largest.width ? candidate : largest,
+      { url: "", width: 0 }
+    );
+    if (largestCandidate.url) return largestCandidate;
   }
 
-  return img.getAttribute("src");
+  const lazySource =
+    img.getAttribute("data-lazy-src") ||
+    img.getAttribute("data-src") ||
+    img.getAttribute("data-original");
+  if (lazySource) return { url: lazySource, width: 0 };
+
+  const src = img.getAttribute("src");
+  return src ? { url: src, width: 0 } : null;
 }
 
 function extractMainArticleImage(document, content, sourceUrl) {
   for (const container of findOriginalArticleContainers(document)) {
-    const topImage = extractImagesFromContainer(container, sourceUrl)
-      .find(isLikelyArticleImage);
-    if (topImage) return topImage;
+    const prominentImage = selectProminentArticleImage(
+      extractImagesFromContainer(container, sourceUrl)
+    );
+    if (prominentImage) return prominentImage;
   }
 
-  const articleImage = extractArticleImages(content, sourceUrl).find(isLikelyArticleImage);
+  const articleImage = selectProminentArticleImage(extractArticleImages(content, sourceUrl));
   if (articleImage) return articleImage;
 
   const metaUrl =
@@ -294,6 +312,18 @@ function findOriginalArticleContainers(document) {
   }
 
   return containers;
+}
+
+function selectProminentArticleImage(images) {
+  const candidates = images.filter(isLikelyArticleImage).slice(0, 8);
+  if (!candidates.length) return null;
+
+  return candidates.reduce((best, image, index) => {
+    const area = (image.width || 0) * (image.height || 0);
+    const positionWeight = (index + 1) ** 2;
+    const score = area > 0 ? area / positionWeight : 1 / positionWeight;
+    return !best || score > best.score ? { image, score } : best;
+  }, null).image;
 }
 
 function isLikelyArticleImage(image) {
@@ -726,7 +756,19 @@ function insertImagesBeforeSourceLink(html, images) {
   return `${html}\n${imageHtml}`;
 }
 
-function buildWordPressPostPayload(post, featuredMediaId) {
+function sourceSlug(sourceUrl) {
+  const segments = new URL(sourceUrl).pathname.split("/").filter(Boolean);
+  const lastSegment = segments.at(-1);
+  if (!lastSegment) return "";
+
+  try {
+    return decodeURIComponent(lastSegment);
+  } catch {
+    return lastSegment;
+  }
+}
+
+function buildWordPressPostPayload(post, featuredMediaId, slug) {
   const payload = {
     title: post.title,
     content: post.html,
@@ -738,10 +780,14 @@ function buildWordPressPostPayload(post, featuredMediaId) {
     payload.featured_media = featuredMediaId;
   }
 
+  if (slug) {
+    payload.slug = slug;
+  }
+
   return payload;
 }
 
-async function createWordPressDraft(post, featuredMediaId) {
+async function createWordPressDraft(post, featuredMediaId, slug) {
   const token = await getWordPressToken();
   const response = await fetch(`${wordpressApiBase()}/posts`, {
     method: "POST",
@@ -749,7 +795,7 @@ async function createWordPressDraft(post, featuredMediaId) {
       Authorization: `Bearer ${token.access_token}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(buildWordPressPostPayload(post, featuredMediaId))
+    body: JSON.stringify(buildWordPressPostPayload(post, featuredMediaId, slug))
   });
 
   const body = await response.text();
@@ -781,12 +827,14 @@ app.post("/api/drafts", async (req, res) => {
       ? await uploadMainImage(article.images, translateImage)
       : [];
     translated.html = insertImagesBeforeSourceLink(translated.html, uploadedImages);
-    const draft = await createWordPressDraft(translated, uploadedImages[0]?.id);
+    const slug = sourceSlug(sourceUrl);
+    const draft = await createWordPressDraft(translated, uploadedImages[0]?.id, slug);
 
     res.json({
       ok: true,
       sourceUrl,
       title: translated.title,
+      slug,
       imageCount: uploadedImages.length,
       imageTranslated: uploadedImages.length > 0 && translateImage,
       wordpress: {
