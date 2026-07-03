@@ -379,7 +379,8 @@ Requirements:
 - Create the excerpt from the translated main article text.
 - Do not add commentary.
 - Return JSON string values with all newlines, tabs, and other control characters properly escaped.
-- At the end of html, add this exact source link paragraph: <p><a href="${sourceUrl}">English</a></p>
+- Escape all double quotes inside JSON string values, including HTML attribute quotes.
+- At the end of html, add this exact source link paragraph: <p><a href="${sourceUrl}">(English)</a></p>
 
 Original title: ${article.title}
 
@@ -393,16 +394,90 @@ function parseJsonFromModel(content) {
   const trimmed = content.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   const jsonText = extractJsonObject(fenced ? fenced[1] : trimmed);
+  const candidates = [
+    jsonText,
+    escapeControlCharactersInJsonStrings(jsonText),
+    insertMissingCommasBetweenKnownProperties(jsonText),
+    escapeControlCharactersInJsonStrings(insertMissingCommasBetweenKnownProperties(jsonText))
+  ];
+  let firstError;
 
-  try {
-    return JSON.parse(jsonText);
-  } catch (error) {
+  for (const candidate of [...new Set(candidates)]) {
     try {
-      return JSON.parse(escapeControlCharactersInJsonStrings(jsonText));
-    } catch {
-      throw new Error(`Translation response was not valid JSON: ${error.message}`);
+      return JSON.parse(candidate);
+    } catch (error) {
+      firstError ||= error;
     }
   }
+
+  try {
+    return parseLooseTranslationObject(jsonText);
+  } catch {
+    throw new Error(`Translation response was not valid JSON: ${firstError.message}`);
+  }
+}
+
+function insertMissingCommasBetweenKnownProperties(value) {
+  return String(value).replace(
+    /(["}\]])\s*("(?:title|html|excerpt)"\s*:)/g,
+    "$1,$2"
+  );
+}
+
+function parseLooseTranslationObject(value) {
+  const fieldPattern = /"(title|html|excerpt)"\s*:/g;
+  const matches = [...String(value).matchAll(fieldPattern)];
+  const result = {};
+
+  for (const [index, match] of matches.entries()) {
+    const key = match[1];
+    const valueStart = match.index + match[0].length;
+    const fallbackEnd = String(value).lastIndexOf("}") > valueStart
+      ? String(value).lastIndexOf("}")
+      : String(value).length;
+    const valueEnd = matches[index + 1]?.index ?? fallbackEnd;
+    if (valueEnd <= valueStart) continue;
+
+    result[key] = decodeLooseJsonStringValue(String(value).slice(valueStart, valueEnd));
+  }
+
+  if (!result.title || !result.html) {
+    throw new Error("Loose translation object did not include title and html.");
+  }
+
+  return result;
+}
+
+function decodeLooseJsonStringValue(value) {
+  let text = String(value).trim();
+
+  if (text.endsWith(",")) {
+    text = text.slice(0, -1).trimEnd();
+  }
+
+  if (text.startsWith('"')) {
+    text = text.slice(1);
+  }
+
+  if (text.endsWith('"')) {
+    text = text.slice(0, -1);
+  }
+
+  return text
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/\\(["\\/bfnrt])/g, (_, char) => {
+      const escapes = {
+        '"': '"',
+        "\\": "\\",
+        "/": "/",
+        b: "\b",
+        f: "\f",
+        n: "\n",
+        r: "\r",
+        t: "\t"
+      };
+      return escapes[char] ?? char;
+    });
 }
 
 function escapeControlCharactersInJsonStrings(value) {
@@ -747,7 +822,7 @@ function insertImagesBeforeSourceLink(html, images) {
   if (!images.length) return html;
 
   const imageHtml = buildImageHtml(images);
-  const sourceLinkPattern = /<p>\s*<a\s+href="[^"]+">\s*English\s*<\/a>\s*<\/p>\s*$/i;
+  const sourceLinkPattern = /<p>\s*<a\s+href="[^"]+">\s*\(?English\)?\s*<\/a>\s*<\/p>\s*$/i;
 
   if (sourceLinkPattern.test(html)) {
     return html.replace(sourceLinkPattern, `${imageHtml}\n$&`);
