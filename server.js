@@ -29,6 +29,7 @@ const browserUserAgent =
 const fetchRetryCount = 3;
 const fetchTimeoutMs = 20000;
 const fetchRetryDelayMs = 600;
+const imageDownloadAccept = "image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/*,*/*;q=0.8";
 const mainContentExcludeSelector = [
   "aside",
   "footer",
@@ -211,7 +212,7 @@ function extractImagesFromContainer(container, sourceUrl) {
 
       let url;
       try {
-        url = new URL(source.url, sourceUrl).toString();
+        url = normalizeSourceImageUrl(new URL(source.url, sourceUrl), sourceUrl);
       } catch {
         return null;
       }
@@ -264,6 +265,15 @@ function imageSourceFromElement(img) {
   return src ? { url: src, width: 0 } : null;
 }
 
+function normalizeSourceImageUrl(imageUrl, sourceUrl) {
+  if (imageUrl.hostname.endsWith(".imgix.net") && imageUrl.pathname.startsWith("/wp-content/uploads/")) {
+    const sourceOrigin = new URL(sourceUrl).origin;
+    return new URL(imageUrl.pathname, sourceOrigin).toString();
+  }
+
+  return imageUrl.toString();
+}
+
 function extractMainArticleImage(document, content, sourceUrl) {
   for (const container of findOriginalArticleContainers(document)) {
     const prominentImage = selectProminentArticleImage(
@@ -282,7 +292,7 @@ function extractMainArticleImage(document, content, sourceUrl) {
 
   try {
     return {
-      url: new URL(metaUrl, sourceUrl).toString(),
+      url: normalizeSourceImageUrl(new URL(metaUrl, sourceUrl), sourceUrl),
       alt:
         document.querySelector("meta[property='og:image:alt']")?.getAttribute("content") ||
         document.querySelector("meta[name='twitter:image:alt']")?.getAttribute("content") ||
@@ -609,21 +619,26 @@ async function translateArticle(article, sourceUrl) {
   const apiKey = requireEnv("OPENROUTER_API_KEY");
   const model = process.env.OPENROUTER_MODEL || "google/gemini-3.5-flash";
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": process.env.WP_SITE_URL || "http://localhost",
-      "X-Title": "WordPress Draft Translator"
-    },
-    body: JSON.stringify({
-      model,
-      messages: buildTranslationPrompt(article, sourceUrl),
-      response_format: { type: "json_object" },
-      temperature: 0.2
-    })
-  });
+  let response;
+  try {
+    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.WP_SITE_URL || "http://localhost",
+        "X-Title": "WordPress Draft Translator"
+      },
+      body: JSON.stringify({
+        model,
+        messages: buildTranslationPrompt(article, sourceUrl),
+        response_format: { type: "json_object" },
+        temperature: 0.2
+      })
+    });
+  } catch (error) {
+    throw new Error(`OpenRouter translation request failed: ${formatFetchError(error)}`);
+  }
 
   if (!response.ok) {
     const body = await response.text();
@@ -653,7 +668,7 @@ async function downloadImage(imageUrl) {
   const response = await fetchGetWithRetry(imageUrl, {
     headers: {
       "User-Agent": browserUserAgent,
-      Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+      Accept: imageDownloadAccept
     }
   }, "Image request");
 
@@ -691,38 +706,43 @@ async function translateImageText(image, index) {
   const model = process.env.OPENROUTER_IMAGE_MODEL || "openai/gpt-5-image";
   const original = await downloadImage(image.url);
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": process.env.WP_SITE_URL || "http://localhost",
-      "X-Title": "WordPress Draft Translator"
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text:
-                "Edit this image. Translate any visible English text into natural Traditional Chinese. Preserve the same image, composition, colors, typography style, layout, non-text visual details, and approximate text placement. If there is no English text, return the image unchanged. Output only the edited image."
-            },
-            {
-              type: "image_url",
-              image_url: { url: original.dataUrl }
-            }
-          ]
+  let response;
+  try {
+    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.WP_SITE_URL || "http://localhost",
+        "X-Title": "WordPress Draft Translator"
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text:
+                  "Edit this image. Translate any visible English text into natural Traditional Chinese. Preserve the same image, composition, colors, typography style, layout, non-text visual details, and approximate text placement. If there is no English text, return the image unchanged. Output only the edited image."
+              },
+              {
+                type: "image_url",
+                image_url: { url: original.dataUrl }
+              }
+            ]
+          }
+        ],
+        modalities: ["image", "text"],
+        image_config: {
+          output_format: "png"
         }
-      ],
-      modalities: ["image", "text"],
-      image_config: {
-        output_format: "png"
-      }
-    })
-  });
+      })
+    });
+  } catch (error) {
+    throw new Error(`OpenRouter image request failed: ${formatFetchError(error)}`);
+  }
 
   if (!response.ok) {
     const body = await response.text();
