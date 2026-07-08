@@ -24,6 +24,11 @@ const wordpressImageMimeTypes = new Set([
   "image/gif",
   "image/webp"
 ]);
+const browserUserAgent =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const fetchRetryCount = 3;
+const fetchTimeoutMs = 20000;
+const fetchRetryDelayMs = 600;
 const mainContentExcludeSelector = [
   "aside",
   "footer",
@@ -338,13 +343,51 @@ function isLikelyArticleImage(image) {
   return true;
 }
 
-async function fetchArticle(url) {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "WordPressDraftTranslator/0.1 (+local app)",
-      Accept: "text/html,application/xhtml+xml"
+async function fetchGetWithRetry(url, options, context) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= fetchRetryCount; attempt += 1) {
+    try {
+      return await fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(fetchTimeoutMs)
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt === fetchRetryCount) break;
+      await wait(fetchRetryDelayMs * attempt);
     }
+  }
+
+  throw new Error(`${context} failed after ${fetchRetryCount} attempts: ${formatFetchError(lastError)}`);
+}
+
+function formatFetchError(error) {
+  const cause = error?.cause;
+  const details = [
+    error?.message,
+    cause?.code,
+    cause?.reason,
+    cause?.message
+  ].filter(Boolean);
+
+  return details.length ? details.join(" - ") : "network request failed";
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
   });
+}
+
+async function fetchArticle(url) {
+  const response = await fetchGetWithRetry(url, {
+    headers: {
+      "User-Agent": browserUserAgent,
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9"
+    }
+  }, "Article request");
 
   if (!response.ok) {
     throw new Error(`Article request failed with HTTP ${response.status}.`);
@@ -607,12 +650,12 @@ async function translateArticle(article, sourceUrl) {
 }
 
 async function downloadImage(imageUrl) {
-  const response = await fetch(imageUrl, {
+  const response = await fetchGetWithRetry(imageUrl, {
     headers: {
-      "User-Agent": "WordPressDraftTranslator/0.1 (+local app)",
+      "User-Agent": browserUserAgent,
       Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
     }
-  });
+  }, "Image request");
 
   if (!response.ok) {
     throw new Error(`Image request failed with HTTP ${response.status}: ${imageUrl}`);
