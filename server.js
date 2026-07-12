@@ -274,6 +274,14 @@ function normalizeSourceImageUrl(imageUrl, sourceUrl) {
     return new URL(imageUrl.pathname, sourceOrigin).toString();
   }
 
+  if (/^i\d\.wp\.com$/i.test(imageUrl.hostname)) {
+    const [, proxiedHost, ...pathSegments] = imageUrl.pathname.split("/");
+    const proxiedPath = `/${pathSegments.join("/")}`;
+    if (proxiedHost && proxiedPath.startsWith("/wp-content/uploads/")) {
+      return new URL(proxiedPath, `${imageUrl.protocol}//${proxiedHost}`).toString();
+    }
+  }
+
   return imageUrl.toString();
 }
 
