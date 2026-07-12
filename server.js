@@ -29,6 +29,9 @@ const browserUserAgent =
 const fetchRetryCount = 3;
 const fetchTimeoutMs = 20000;
 const fetchRetryDelayMs = 600;
+const openRouterRetryCount = 4;
+const openRouterTimeoutMs = 90000;
+const openRouterRetryDelayMs = 1500;
 const imageDownloadAccept = "image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/*,*/*;q=0.8";
 const mainContentExcludeSelector = [
   "aside",
@@ -354,22 +357,35 @@ function isLikelyArticleImage(image) {
 }
 
 async function fetchGetWithRetry(url, options, context) {
+  return fetchWithRetry(url, options, context, {
+    retryCount: fetchRetryCount,
+    timeoutMs: fetchTimeoutMs,
+    retryDelayMs: fetchRetryDelayMs
+  });
+}
+
+async function fetchWithRetry(url, options, context, retryOptions) {
+  const {
+    retryCount,
+    timeoutMs,
+    retryDelayMs
+  } = retryOptions;
   let lastError;
 
-  for (let attempt = 1; attempt <= fetchRetryCount; attempt += 1) {
+  for (let attempt = 1; attempt <= retryCount; attempt += 1) {
     try {
       return await fetch(url, {
         ...options,
-        signal: AbortSignal.timeout(fetchTimeoutMs)
+        signal: AbortSignal.timeout(timeoutMs)
       });
     } catch (error) {
       lastError = error;
-      if (attempt === fetchRetryCount) break;
-      await wait(fetchRetryDelayMs * attempt);
+      if (attempt === retryCount) break;
+      await wait(retryDelayMs * attempt);
     }
   }
 
-  throw new Error(`${context} failed after ${fetchRetryCount} attempts: ${formatFetchError(lastError)}`);
+  throw new Error(`${context} failed after ${retryCount} attempts: ${formatFetchError(lastError)}`);
 }
 
 function formatFetchError(error) {
@@ -619,9 +635,9 @@ async function translateArticle(article, sourceUrl) {
   const apiKey = requireEnv("OPENROUTER_API_KEY");
   const model = process.env.OPENROUTER_MODEL || "google/gemini-3.5-flash";
 
-  let response;
-  try {
-    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const response = await fetchWithRetry(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -635,10 +651,14 @@ async function translateArticle(article, sourceUrl) {
         response_format: { type: "json_object" },
         temperature: 0.2
       })
-    });
-  } catch (error) {
-    throw new Error(`OpenRouter translation request failed: ${formatFetchError(error)}`);
-  }
+    },
+    "OpenRouter translation request",
+    {
+      retryCount: openRouterRetryCount,
+      timeoutMs: openRouterTimeoutMs,
+      retryDelayMs: openRouterRetryDelayMs
+    }
+  );
 
   if (!response.ok) {
     const body = await response.text();
@@ -706,9 +726,9 @@ async function translateImageText(image, index) {
   const model = process.env.OPENROUTER_IMAGE_MODEL || "openai/gpt-5-image";
   const original = await downloadImage(image.url);
 
-  let response;
-  try {
-    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const response = await fetchWithRetry(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -739,10 +759,14 @@ async function translateImageText(image, index) {
           output_format: "png"
         }
       })
-    });
-  } catch (error) {
-    throw new Error(`OpenRouter image request failed: ${formatFetchError(error)}`);
-  }
+    },
+    "OpenRouter image request",
+    {
+      retryCount: openRouterRetryCount,
+      timeoutMs: openRouterTimeoutMs,
+      retryDelayMs: openRouterRetryDelayMs
+    }
+  );
 
   if (!response.ok) {
     const body = await response.text();
