@@ -136,4 +136,5 @@ form.addEventListener("submit", async (event) => {
 
 includeImageInput.addEventListener("change", () => setBusy(false));
 
+setBusy(false);
 refreshAuthStatus();
