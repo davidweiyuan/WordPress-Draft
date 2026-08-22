@@ -51,6 +51,8 @@ Every draft ends with a link to the original article titled `English`.
 - Text translation: `google/gemini-3.5-flash`
 - Image text translation/editing: `openai/gpt-5-image`
 
+If a publisher blocks the app's direct article request or returns unreadable HTML, the app falls back to OpenRouter's URL-fetch tool and translates the retrieved main article. This fallback may add OpenRouter web-fetch usage charges.
+
 When `Include Image` is checked, the image pipeline compares the early article images and selects the most prominent large image, processing at most one image per draft. That same uploaded image is inserted into the post and assigned as the WordPress featured image/thumbnail. The image model is only used when `Translate` is also checked.
 
 The WordPress draft slug is copied from the final path segment of the original article URL.
