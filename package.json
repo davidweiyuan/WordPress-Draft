@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "NODE_ENV=test node --test"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
