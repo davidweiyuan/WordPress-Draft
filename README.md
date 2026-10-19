@@ -40,11 +40,12 @@ Local app for turning an English article URL into a Traditional Chinese WordPres
 6. Paste an English article URL and use either:
 
    - `Preview` to translate text without creating a post.
+   - Optionally enter an author name to show it centered beneath the post title.
    - Leave `Include Image` checked to add the lead article image. Uncheck it to create a text-only draft.
    - Leave `Translate` checked to translate English text inside the image. Uncheck it to add the original image unchanged.
    - `Create Draft` to translate the main article text and create a WordPress draft.
 
-Every draft ends with a link to the original article titled `English`.
+Every draft shows a centered source line beneath the title. When an author is entered, the line uses `Author, 譯自網絡`; otherwise it shows `譯自網絡` by itself. The source label links to the original article.
 
 ## Models
 

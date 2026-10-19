@@ -1,5 +1,6 @@
 const form = document.querySelector("#draft-form");
 const urlInput = document.querySelector("#url-input");
+const authorInput = document.querySelector("#author-input");
 const previewButton = document.querySelector("#preview-button");
 const draftButton = document.querySelector("#draft-button");
 const includeImageInput = document.querySelector("#include-image");
@@ -15,6 +16,7 @@ function setBusy(isBusy, label = "Working") {
   draftButton.disabled = isBusy;
   includeImageInput.disabled = isBusy;
   translateImageInput.disabled = isBusy || !includeImageInput.checked;
+  authorInput.disabled = isBusy;
   statusPill.textContent = isBusy ? label : "Ready";
 }
 
@@ -36,11 +38,11 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-async function requestJson(path, url, includeImage, translateImage) {
+async function requestJson(path, url, author, includeImage, translateImage) {
   const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, includeImage, translateImage })
+    body: JSON.stringify({ url, author, includeImage, translateImage })
   });
 
   const data = await response.json();
@@ -78,6 +80,7 @@ previewButton.addEventListener("click", async () => {
     const data = await requestJson(
       "/api/preview",
       urlInput.value,
+      authorInput.value,
       includeImage,
       translateImage
     );
@@ -113,6 +116,7 @@ form.addEventListener("submit", async (event) => {
     const data = await requestJson(
       "/api/drafts",
       urlInput.value,
+      authorInput.value,
       includeImage,
       translateImage
     );

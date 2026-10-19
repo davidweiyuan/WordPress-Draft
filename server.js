@@ -435,7 +435,7 @@ async function fetchArticle(url) {
   return response.text();
 }
 
-function buildTranslationPrompt(article, sourceUrl) {
+function buildTranslationPrompt(article) {
   return [
     {
       role: "system",
@@ -457,7 +457,7 @@ Requirements:
 - Do not add commentary.
 - Return JSON string values with all newlines, tabs, and other control characters properly escaped.
 - Escape all double quotes inside JSON string values, including HTML attribute quotes.
-- At the end of html, add this exact source link paragraph: <p><a href="${sourceUrl}">(English)</a></p>
+- Do not add the author, a byline, or a source link; the application adds them separately.
 
 Original title: ${article.title}
 
@@ -639,7 +639,7 @@ function extractJsonObject(value) {
   return text;
 }
 
-async function translateArticle(article, sourceUrl) {
+async function translateArticle(article) {
   const apiKey = requireEnv("OPENROUTER_API_KEY");
   const model = process.env.OPENROUTER_MODEL || "google/gemini-3.5-flash";
 
@@ -655,7 +655,7 @@ async function translateArticle(article, sourceUrl) {
       },
       body: JSON.stringify({
         model,
-        messages: buildTranslationPrompt(article, sourceUrl),
+        messages: buildTranslationPrompt(article),
         response_format: { type: "json_object" },
         temperature: 0.2
       })
@@ -913,17 +913,27 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function insertImagesBeforeSourceLink(html, images) {
+function appendImages(html, images) {
   if (!images.length) return html;
 
   const imageHtml = buildImageHtml(images);
-  const sourceLinkPattern = /<p>\s*<a\s+href="[^"]+">\s*\(?English\)?\s*<\/a>\s*<\/p>\s*$/i;
-
-  if (sourceLinkPattern.test(html)) {
-    return html.replace(sourceLinkPattern, `${imageHtml}\n$&`);
-  }
-
   return `${html}\n${imageHtml}`;
+}
+
+function normalizeAuthor(value) {
+  return String(value || "").trim().slice(0, 200);
+}
+
+function addAuthorAndSourceLine(html, author, sourceUrl) {
+  const legacySourceLinkPattern = /<p>\s*<a\s+href="[^"]+">\s*\(?English\)?\s*<\/a>\s*<\/p>\s*$/i;
+  const bodyHtml = String(html).replace(legacySourceLinkPattern, "").trim();
+  const sourceLink = `<a href="${escapeHtml(sourceUrl)}">譯自網絡</a>`;
+  const authorText = normalizeAuthor(author);
+  const byline = authorText
+    ? `${escapeHtml(authorText)}, ${sourceLink}`
+    : sourceLink;
+
+  return `<p class="has-text-align-center">${byline}</p>\n${bodyHtml}`;
 }
 
 function sourceSlug(sourceUrl) {
@@ -986,17 +996,21 @@ async function createWordPressDraft(post, featuredMediaId, slug) {
 app.post("/api/drafts", async (req, res) => {
   try {
     const sourceUrl = normalizeUrl(req.body?.url || "");
+    const author = normalizeAuthor(req.body?.author);
     const includeImage = req.body?.includeImage !== false;
     const translateImage = req.body?.translateImage !== false;
     await getWordPressToken();
 
     const html = await fetchArticle(sourceUrl);
     const article = extractArticle(html, sourceUrl);
-    const translated = await translateArticle(article, sourceUrl);
+    const translated = await translateArticle(article);
     const uploadedImages = includeImage
       ? await uploadMainImage(article.images, translateImage)
       : [];
-    translated.html = insertImagesBeforeSourceLink(translated.html, uploadedImages);
+    translated.html = appendImages(
+      addAuthorAndSourceLine(translated.html, author, sourceUrl),
+      uploadedImages
+    );
     const slug = sourceSlug(sourceUrl);
     const draft = await createWordPressDraft(translated, uploadedImages[0]?.id, slug);
 
@@ -1101,11 +1115,13 @@ app.get("/api/auth/status", async (req, res) => {
 app.post("/api/preview", async (req, res) => {
   try {
     const sourceUrl = normalizeUrl(req.body?.url || "");
+    const author = normalizeAuthor(req.body?.author);
     const includeImage = req.body?.includeImage !== false;
     const translateImage = req.body?.translateImage !== false;
     const html = await fetchArticle(sourceUrl);
     const article = extractArticle(html, sourceUrl);
-    const translated = await translateArticle(article, sourceUrl);
+    const translated = await translateArticle(article);
+    translated.html = addAuthorAndSourceLine(translated.html, author, sourceUrl);
 
     res.json({
       ok: true,

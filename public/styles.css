@@ -144,7 +144,8 @@ label {
   gap: 10px;
 }
 
-.url-row input {
+.url-row input,
+#author-input {
   min-width: 0;
   width: 100%;
   height: 46px;
@@ -155,7 +156,8 @@ label {
   color: var(--ink);
 }
 
-.url-row input:focus {
+.url-row input:focus,
+#author-input:focus {
   border-color: var(--accent);
   outline: 3px solid rgba(31, 111, 104, 0.16);
 }
@@ -256,6 +258,10 @@ button:disabled {
 
 .preview-output p {
   margin: 0 0 1em;
+}
+
+.preview-output .has-text-align-center {
+  text-align: center;
 }
 
 .muted {
