@@ -1139,6 +1139,6 @@ app.post("/api/preview", async (req, res) => {
   }
 });
 
-app.listen(port, () => {
+app.listen(port, "localhost", () => {
   console.log(`WordPress Draft Translator running at http://localhost:${port}`);
 });

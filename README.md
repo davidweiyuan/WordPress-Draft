@@ -17,9 +17,17 @@ Local app for turning an English article URL into a Traditional Chinese WordPres
    - Add this redirect URL exactly: `http://localhost:3000/auth/callback`.
    - Copy the app's client ID and client secret.
 
-3. Add the WordPress.com app credentials to `.env`:
+3. Copy `.env.example` to `.env`:
 
    ```sh
+   cp .env.example .env
+   ```
+
+   Create an API key in your [OpenRouter account](https://openrouter.ai/settings/keys), then fill in the key, your WordPress site URL, and your WordPress.com app credentials:
+
+   ```sh
+   OPENROUTER_API_KEY=your-openrouter-api-key
+   WP_SITE_URL=https://your-site.wordpress.com
    WP_CLIENT_ID=your-client-id
    WP_CLIENT_SECRET=your-client-secret
    WP_REDIRECT_URI=http://localhost:3000/auth/callback
@@ -27,11 +35,15 @@ Local app for turning an English article URL into a Traditional Chinese WordPres
    WP_SCOPE=posts
    ```
 
+   Set `WP_SITE_URL` to your site's full public URL, including `https://`. `WP_SITE_ID` is optional; leave it blank to use the hostname from `WP_SITE_URL`. The OpenRouter key is required for text translation and, when enabled, image translation.
+
 4. Start the app:
 
    ```sh
    npm run dev
    ```
+
+   The server binds explicitly to `localhost` for local-only access. If you change `PORT` in `.env`, update `WP_REDIRECT_URI` and the developer application's redirect URL to match.
 
 5. Open `http://localhost:3000` and click `Connect WordPress.com`.
 
