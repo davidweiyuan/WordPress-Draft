@@ -32,7 +32,7 @@ Local app for turning an English article URL into a Traditional Chinese WordPres
    WP_CLIENT_SECRET=your-client-secret
    WP_REDIRECT_URI=http://localhost:3000/auth/callback
    WP_SITE_ID=your-wordpress-site-id
-   WP_SCOPE=posts
+   WP_SCOPE=global
    ```
 
    Set `WP_SITE_URL` to your site's full public URL, including `https://`. `WP_SITE_ID` is optional; leave it blank to use the hostname from `WP_SITE_URL`. The OpenRouter key is required for text translation and, when enabled, image translation.

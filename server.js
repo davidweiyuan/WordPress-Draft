@@ -1045,7 +1045,7 @@ app.get("/auth/login", (req, res) => {
     authorizeUrl.searchParams.set("redirect_uri", redirectUri);
     authorizeUrl.searchParams.set("response_type", "code");
     authorizeUrl.searchParams.set("blog", publicWordPressSiteHost());
-    authorizeUrl.searchParams.set("scope", process.env.WP_SCOPE || "posts");
+    authorizeUrl.searchParams.set("scope", process.env.WP_SCOPE || "global");
 
     res.redirect(authorizeUrl.toString());
   } catch (error) {
